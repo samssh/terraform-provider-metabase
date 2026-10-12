@@ -1,5 +1,9 @@
 ## Unreleased
 
+NEW FEATURES:
+
+- Add the `metadata_sync_schedule` and `cache_field_values_schedule` attributes to `metabase_database`. They are required to create a database with `let-user-control-scheduling` enabled, which previously failed with a 500 error. They are only sent when creating or updating the database, and are not read back from Metabase.
+
 ## 0.19.0 (2026-10-19)
 
 NEW FEATURES:
