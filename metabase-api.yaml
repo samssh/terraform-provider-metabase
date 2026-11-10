@@ -1373,6 +1373,8 @@ components:
           $ref: "#/components/schemas/DatabaseEngine"
         details:
           $ref: "#/components/schemas/DatabaseDetails"
+        schedules:
+          $ref: "#/components/schemas/DatabaseSchedules"
       required:
         - id
         - name
@@ -1403,6 +1405,9 @@ components:
         dataset-filters-patterns:
           type: string
           description: The pattern used by the `dataset-filters-type`.
+        let-user-control-scheduling:
+          type: boolean
+          description: Whether the schedules of the database are set by the user, rather than chosen by Metabase.
       required:
         - service-account-json
     DatabaseDetailsCustom:
@@ -1423,12 +1428,19 @@ components:
             - monthly
         schedule_hour:
           type: integer
+          nullable: true
           description: The hour of the day (0-23) at which the task runs. Ignored for hourly schedules.
+        schedule_minute:
+          type: integer
+          nullable: true
+          description: The minute of the hour (0-59) at which the task runs. Only used by hourly schedules.
         schedule_day:
           type: string
-          description: The day of the week (`mon` to `sun`) for weekly schedules, or for monthly schedules on a given weekday.
+          nullable: true
+          description: The day of the week (`sun` to `sat`) for weekly schedules, or for monthly schedules on a given weekday.
         schedule_frame:
           type: string
+          nullable: true
           description: The position of the day within the month for monthly schedules (`first`, `mid` or `last`).
       required:
         - schedule_type
@@ -1439,7 +1451,9 @@ components:
         metadata_sync:
           $ref: "#/components/schemas/DatabaseSchedule"
         cache_field_values:
-          $ref: "#/components/schemas/DatabaseSchedule"
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/DatabaseSchedule"
     CreateDatabaseBody:
       type: object
       description: The payload used to create a new database.

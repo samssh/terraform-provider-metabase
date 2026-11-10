@@ -85,9 +85,9 @@ resource "metabase_database" "custom" {
 ### Optional
 
 - `bigquery_details` (Attributes) Connection details when setting up a BigQuery database. (see [below for nested schema](#nestedatt--bigquery_details))
-- `cache_field_values_schedule` (Attributes) When Metabase rescans the field values of the database. Only sent to Metabase when creating or updating the database: it is not read back, so changes made in Metabase are not detected. (see [below for nested schema](#nestedatt--cache_field_values_schedule))
+- `cache_field_values_schedule` (Attributes) When Metabase rescans the field values of the database. It should only be set when "Scan for filter values" is set to "Regularly, on a schedule" for the database, as Metabase otherwise clears it, which shows up as a permanent diff. Schedules only apply to databases with `let-user-control-scheduling` enabled, as Metabase otherwise picks its own. With `custom_details`, `let-user-control-scheduling` must be set to `true` in `details_json`, and both schedules must then be set. With `bigquery_details`, the provider enables it whenever the schedules are set, and both or neither must be set. When the attribute is removed, Metabase keeps its last schedule, which is no longer managed. (see [below for nested schema](#nestedatt--cache_field_values_schedule))
 - `custom_details` (Attributes) Connection details when setting up a database which is not supported by this provider. (see [below for nested schema](#nestedatt--custom_details))
-- `metadata_sync_schedule` (Attributes) When Metabase syncs the database metadata. Required, together with `cache_field_values_schedule`, when the database uses `let-user-control-scheduling`. Only sent to Metabase when creating or updating the database: it is not read back, so changes made in Metabase are not detected. (see [below for nested schema](#nestedatt--metadata_sync_schedule))
+- `metadata_sync_schedule` (Attributes) When Metabase syncs the database metadata. Schedules only apply to databases with `let-user-control-scheduling` enabled, as Metabase otherwise picks its own. With `custom_details`, `let-user-control-scheduling` must be set to `true` in `details_json`, and both schedules must then be set. With `bigquery_details`, the provider enables it whenever the schedules are set, and both or neither must be set. When the attribute is removed, Metabase keeps its last schedule, which is no longer managed. (see [below for nested schema](#nestedatt--metadata_sync_schedule))
 
 ### Read-Only
 
@@ -116,9 +116,10 @@ Required:
 
 Optional:
 
-- `schedule_day` (String) The day of the week (`mon` to `sun`), for weekly schedules or monthly schedules on a given weekday.
-- `schedule_frame` (String) The position within the month for monthly schedules. Can be `first`, `mid` or `last`.
-- `schedule_hour` (Number) The hour of the day (0-23) at which the task runs. Ignored for hourly schedules.
+- `schedule_day` (String) The day of the week (`sun`, `mon`, `tue`, `wed`, `thu`, `fri` or `sat`). Required for `weekly` schedules, and optional for `monthly` schedules with a `first` or `last` frame, which then run on the first or last such weekday of the month. Not allowed otherwise.
+- `schedule_frame` (String) The position within the month. Can be `first`, `mid` (the 15th) or `last`. Required for `monthly` schedules, and not allowed otherwise.
+- `schedule_hour` (Number) The hour of the day (0-23) at which the task runs. Required for `weekly` and `monthly` schedules, defaults to 0 for `daily` schedules, and not allowed for `hourly` schedules.
+- `schedule_minute` (Number) The minute of the hour (0-59) at which the task runs. Only allowed for `hourly` schedules, for which it defaults to 0.
 
 
 <a id="nestedatt--custom_details"></a>
@@ -145,9 +146,10 @@ Required:
 
 Optional:
 
-- `schedule_day` (String) The day of the week (`mon` to `sun`), for weekly schedules or monthly schedules on a given weekday.
-- `schedule_frame` (String) The position within the month for monthly schedules. Can be `first`, `mid` or `last`.
-- `schedule_hour` (Number) The hour of the day (0-23) at which the task runs. Ignored for hourly schedules.
+- `schedule_day` (String) The day of the week (`sun`, `mon`, `tue`, `wed`, `thu`, `fri` or `sat`). Required for `weekly` schedules, and optional for `monthly` schedules with a `first` or `last` frame, which then run on the first or last such weekday of the month. Not allowed otherwise.
+- `schedule_frame` (String) The position within the month. Can be `first`, `mid` (the 15th) or `last`. Required for `monthly` schedules, and not allowed otherwise.
+- `schedule_hour` (Number) The hour of the day (0-23) at which the task runs. Required for `weekly` and `monthly` schedules, defaults to 0 for `daily` schedules, and not allowed for `hourly` schedules.
+- `schedule_minute` (Number) The minute of the hour (0-59) at which the task runs. Only allowed for `hourly` schedules, for which it defaults to 0.
 
 ## Import
 

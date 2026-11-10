@@ -2,7 +2,7 @@
 
 NEW FEATURES:
 
-- Add the `metadata_sync_schedule` and `cache_field_values_schedule` attributes to `metabase_database`. They are required to create a database with `let-user-control-scheduling` enabled, which previously failed with a 500 error. They are only sent when creating or updating the database, and are not read back from Metabase.
+- Add the `metadata_sync_schedule` and `cache_field_values_schedule` attributes to `metabase_database`. They are required to create a database with `let-user-control-scheduling` enabled, which previously failed with a 500 error, and this is now reported when validating the configuration. As Metabase picks its own schedules otherwise, schedules are rejected for `custom_details` which do not enable `let-user-control-scheduling`, while the provider enables it itself for `bigquery_details`. Combinations of attributes which Metabase rejects or partly ignores are also reported when validating the configuration. The schedules are read back from Metabase, such that changes made in Metabase are detected, and the schedules controlled by the user are imported.
 
 ## 0.19.0 (2026-10-19)
 

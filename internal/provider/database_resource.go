@@ -45,14 +45,6 @@ type DatabaseResourceModel struct {
 	CacheFieldValuesSchedule types.Object `tfsdk:"cache_field_values_schedule"` // When Metabase rescans the field values.
 }
 
-// The content of the `metadata_sync_schedule` and `cache_field_values_schedule` attributes.
-type DatabaseSchedule struct {
-	ScheduleType  types.String `tfsdk:"schedule_type"`  // How often the task runs.
-	ScheduleHour  types.Int64  `tfsdk:"schedule_hour"`  // The hour of the day at which the task runs.
-	ScheduleDay   types.String `tfsdk:"schedule_day"`   // The day of the week.
-	ScheduleFrame types.String `tfsdk:"schedule_frame"` // The position within the month.
-}
-
 // The content of the `bigquery_details` attribute to set up a BigQuery connection.
 type BigQueryDetails struct {
 	ServiceAccountKey      types.String `tfsdk:"service_account_key"`      // The content of the service account key.
@@ -68,16 +60,6 @@ type CustomDetails struct {
 	SensitiveDetailsJsonWo        types.String `tfsdk:"sensitive_details_json_wo"`         // A write-only JSON object merged into `details_json`.
 	SensitiveDetailsJsonWoVersion types.Int64  `tfsdk:"sensitive_details_json_wo_version"` // The version used to trigger updates of `sensitive_details_json_wo`.
 	RedactedAttributes            types.Set    `tfsdk:"redacted_attributes"`               // The list of `details_json` attributes that are sent back redacted by Metabase.
-}
-
-// The object type for database schedules.
-var databaseScheduleObjectType = types.ObjectType{
-	AttrTypes: map[string]attr.Type{
-		"schedule_type":  types.StringType,
-		"schedule_hour":  types.Int64Type,
-		"schedule_day":   types.StringType,
-		"schedule_frame": types.StringType,
-	},
 }
 
 // The object type for BigQuery details.
@@ -101,31 +83,6 @@ var customDetailsObjectType = types.ObjectType{
 			ElemType: types.StringType,
 		},
 	},
-}
-
-func databaseScheduleAttribute(description string) schema.SingleNestedAttribute {
-	return schema.SingleNestedAttribute{
-		MarkdownDescription: description + " Only sent to Metabase when creating or updating the database: it is not read back, so changes made in Metabase are not detected.",
-		Optional:            true,
-		Attributes: map[string]schema.Attribute{
-			"schedule_type": schema.StringAttribute{
-				MarkdownDescription: "How often the task runs. Can be `hourly`, `daily`, `weekly` or `monthly`.",
-				Required:            true,
-			},
-			"schedule_hour": schema.Int64Attribute{
-				MarkdownDescription: "The hour of the day (0-23) at which the task runs. Ignored for hourly schedules.",
-				Optional:            true,
-			},
-			"schedule_day": schema.StringAttribute{
-				MarkdownDescription: "The day of the week (`mon` to `sun`), for weekly schedules or monthly schedules on a given weekday.",
-				Optional:            true,
-			},
-			"schedule_frame": schema.StringAttribute{
-				MarkdownDescription: "The position within the month for monthly schedules. Can be `first`, `mid` or `last`.",
-				Optional:            true,
-			},
-		},
-	}
 }
 
 func (r *DatabaseResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
@@ -167,8 +124,8 @@ The configuration of this resource requires passing sensitive credentials to the
 					},
 				},
 			},
-			"metadata_sync_schedule":      databaseScheduleAttribute("When Metabase syncs the database metadata. Required, together with `cache_field_values_schedule`, when the database uses `let-user-control-scheduling`."),
-			"cache_field_values_schedule": databaseScheduleAttribute("When Metabase rescans the field values of the database."),
+			"metadata_sync_schedule":      databaseScheduleAttribute("When Metabase syncs the database metadata."),
+			"cache_field_values_schedule": databaseScheduleAttribute("When Metabase rescans the field values of the database. It should only be set when \"Scan for filter values\" is set to \"Regularly, on a schedule\" for the database, as Metabase otherwise clears it, which shows up as a permanent diff."),
 			"custom_details": schema.SingleNestedAttribute{
 				MarkdownDescription: "Connection details when setting up a database which is not supported by this provider.",
 				Optional:            true,
@@ -275,7 +232,33 @@ func (r *DatabaseResource) ValidateConfig(ctx context.Context, req resource.Vali
 	var data DatabaseResourceModel
 
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() || data.CustomDetails.IsNull() || data.CustomDetails.IsUnknown() {
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	schedules := map[string]types.Object{
+		"metadata_sync_schedule":      data.MetadataSyncSchedule,
+		"cache_field_values_schedule": data.CacheFieldValuesSchedule,
+	}
+	for attribute, value := range schedules {
+		if value.IsNull() || value.IsUnknown() {
+			continue
+		}
+
+		var schedule DatabaseSchedule
+		resp.Diagnostics.Append(value.As(ctx, &schedule, basetypes.ObjectAsOptions{})...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		resp.Diagnostics.Append(validateDatabaseSchedule(path.Root(attribute), schedule)...)
+	}
+
+	if !data.BigQueryDetails.IsNull() && !data.BigQueryDetails.IsUnknown() {
+		resp.Diagnostics.Append(validateBigQuerySchedules(data.MetadataSyncSchedule, data.CacheFieldValuesSchedule)...)
+	}
+
+	if data.CustomDetails.IsNull() || data.CustomDetails.IsUnknown() {
 		return
 	}
 
@@ -286,6 +269,7 @@ func (r *DatabaseResource) ValidateConfig(ctx context.Context, req resource.Vali
 	}
 
 	resp.Diagnostics.Append(validateCustomDetails(customDetails)...)
+	resp.Diagnostics.Append(validateCustomDetailsSchedules(customDetails, data.MetadataSyncSchedule, data.CacheFieldValuesSchedule)...)
 }
 
 // Makes the Terraform object for the `bigquery_details` field.
@@ -489,11 +473,19 @@ func makeEngineAndDetailsFromModel(ctx context.Context, data DatabaseResourceMod
 
 		engine = metabase.BigqueryCloudSdk
 
+		// Metabase ignores the schedules unless they are controlled by the user.
+		var letUserControlScheduling *bool
+		if hasDatabaseSchedules(data) {
+			enabled := true
+			letUserControlScheduling = &enabled
+		}
+
 		err := details.FromDatabaseDetailsBigQuery(metabase.DatabaseDetailsBigQuery{
-			ServiceAccountJson:     bqd.ServiceAccountKey.ValueString(),
-			ProjectId:              valueStringOrNull(bqd.ProjectId),
-			DatasetFiltersType:     valueApproximateStringOrNull[metabase.DatabaseDetailsBigQueryDatasetFiltersType](bqd.DatasetFiltersType),
-			DatasetFiltersPatterns: valueStringOrNull(bqd.DatasetFiltersPatterns),
+			ServiceAccountJson:       bqd.ServiceAccountKey.ValueString(),
+			ProjectId:                valueStringOrNull(bqd.ProjectId),
+			DatasetFiltersType:       valueApproximateStringOrNull[metabase.DatabaseDetailsBigQueryDatasetFiltersType](bqd.DatasetFiltersType),
+			DatasetFiltersPatterns:   valueStringOrNull(bqd.DatasetFiltersPatterns),
+			LetUserControlScheduling: letUserControlScheduling,
 		})
 		if err != nil {
 			diags.AddError("Failed to prepare database payload from Terraform model.", err.Error())
@@ -562,46 +554,6 @@ func makeEngineAndDetailsFromModel(ctx context.Context, data DatabaseResourceMod
 	}, diags
 }
 
-// Converts the schedule attributes of a `DatabaseResourceModel` to the `schedules` payload, or `nil` if none is set.
-func makeSchedulesFromModel(ctx context.Context, data DatabaseResourceModel) (*metabase.DatabaseSchedules, diag.Diagnostics) {
-	var diags diag.Diagnostics
-
-	convert := func(v types.Object) *metabase.DatabaseSchedule {
-		if v.IsNull() || v.IsUnknown() {
-			return nil
-		}
-
-		var s DatabaseSchedule
-		diags.Append(v.As(ctx, &s, basetypes.ObjectAsOptions{})...)
-		if diags.HasError() {
-			return nil
-		}
-
-		var hour *int
-		if !s.ScheduleHour.IsNull() {
-			h := int(s.ScheduleHour.ValueInt64())
-			hour = &h
-		}
-
-		return &metabase.DatabaseSchedule{
-			ScheduleType:  metabase.DatabaseScheduleScheduleType(s.ScheduleType.ValueString()),
-			ScheduleHour:  hour,
-			ScheduleDay:   valueStringOrNull(s.ScheduleDay),
-			ScheduleFrame: valueStringOrNull(s.ScheduleFrame),
-		}
-	}
-
-	schedules := metabase.DatabaseSchedules{
-		MetadataSync:     convert(data.MetadataSyncSchedule),
-		CacheFieldValues: convert(data.CacheFieldValuesSchedule),
-	}
-	if diags.HasError() || (schedules.MetadataSync == nil && schedules.CacheFieldValues == nil) {
-		return nil, diags
-	}
-
-	return &schedules, diags
-}
-
 func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var data *DatabaseResourceModel
 	var config *DatabaseResourceModel
@@ -667,7 +619,15 @@ func (r *DatabaseResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
+	// Only the ID is known when the database has just been imported.
+	imported := data.Name.IsNull()
+
 	resp.Diagnostics.Append(updateModelFromDatabase(ctx, *getResp.JSON200, data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(updateSchedulesFromDatabase(ctx, *getResp.JSON200, data, imported)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -693,20 +653,27 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	schedules, diags := makeSchedulesFromModel(ctx, *data)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
+	body := metabase.UpdateDatabaseBody{
+		Name: valueStringOrNull(data.Name),
 	}
 
-	body := metabase.UpdateDatabaseBody{
-		Name:      valueStringOrNull(data.Name),
-		Schedules: schedules,
+	// Only updating schedules if they have changed. Metabase could otherwise pick new ones on each update.
+	if !state.MetadataSyncSchedule.Equal(data.MetadataSyncSchedule) ||
+		!state.CacheFieldValuesSchedule.Equal(data.CacheFieldValuesSchedule) {
+		schedules, diags := makeSchedulesFromModel(ctx, *data)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		body.Schedules = schedules
 	}
 
 	// Only updating database details if they have changed. This avoids unnecessarily passing credentials in API calls.
+	// The BigQuery details also depend on whether schedules are set, as the provider then lets the user control them.
 	if !state.BigQueryDetails.Equal(data.BigQueryDetails) ||
-		!state.CustomDetails.Equal(data.CustomDetails) {
+		!state.CustomDetails.Equal(data.CustomDetails) ||
+		(!data.BigQueryDetails.IsNull() && hasDatabaseSchedules(*state) != hasDatabaseSchedules(*data)) {
 		engineAndDetails, diags := makeEngineAndDetailsFromModel(ctx, *data, config.CustomDetails)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {

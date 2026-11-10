@@ -562,6 +562,9 @@ type Database struct {
 
 	// Name The user-displayable name for the database.
 	Name string `json:"name"`
+
+	// Schedules The schedules of the recurring tasks of a database.
+	Schedules *DatabaseSchedules `json:"schedules,omitempty"`
 }
 
 // DatabaseDetails Engine-specific details used to configure the connection to the database.
@@ -576,6 +579,9 @@ type DatabaseDetailsBigQuery struct {
 
 	// DatasetFiltersType The behavior of how BigQuery datasets should be selected.
 	DatasetFiltersType *DatabaseDetailsBigQueryDatasetFiltersType `json:"dataset-filters-type,omitempty"`
+
+	// LetUserControlScheduling Whether the schedules of the database are set by the user, rather than chosen by Metabase.
+	LetUserControlScheduling *bool `json:"let-user-control-scheduling,omitempty"`
 
 	// ProjectId The ID of the GCP project containing the BigQuery datasets.
 	ProjectId *string `json:"project-id,omitempty"`
@@ -604,7 +610,7 @@ type DatabaseList struct {
 
 // DatabaseSchedule A schedule describing when Metabase runs a recurring database task.
 type DatabaseSchedule struct {
-	// ScheduleDay The day of the week (`mon` to `sun`) for weekly schedules, or for monthly schedules on a given weekday.
+	// ScheduleDay The day of the week (`sun` to `sat`) for weekly schedules, or for monthly schedules on a given weekday.
 	ScheduleDay *string `json:"schedule_day,omitempty"`
 
 	// ScheduleFrame The position of the day within the month for monthly schedules (`first`, `mid` or `last`).
@@ -612,6 +618,9 @@ type DatabaseSchedule struct {
 
 	// ScheduleHour The hour of the day (0-23) at which the task runs. Ignored for hourly schedules.
 	ScheduleHour *int `json:"schedule_hour,omitempty"`
+
+	// ScheduleMinute The minute of the hour (0-59) at which the task runs. Only used by hourly schedules.
+	ScheduleMinute *int `json:"schedule_minute,omitempty"`
 
 	// ScheduleType How often the task runs.
 	ScheduleType DatabaseScheduleScheduleType `json:"schedule_type"`
@@ -622,7 +631,6 @@ type DatabaseScheduleScheduleType string
 
 // DatabaseSchedules The schedules of the recurring tasks of a database.
 type DatabaseSchedules struct {
-	// CacheFieldValues A schedule describing when Metabase runs a recurring database task.
 	CacheFieldValues *DatabaseSchedule `json:"cache_field_values,omitempty"`
 
 	// MetadataSync A schedule describing when Metabase runs a recurring database task.
